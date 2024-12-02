@@ -1,12 +1,16 @@
 const socket = io();
 let localStream;
 let peerConnection;
-let userId;
 let currentRoom;
+let isConnected = false;
 
 const configuration = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
     ]
 };
 
@@ -19,12 +23,23 @@ const statusDiv = document.getElementById('status');
 startButton.addEventListener('click', startChat);
 nextButton.addEventListener('click', nextPeer);
 
+// Socket connection status
+socket.on('connect', () => {
+    console.log('Connected to server');
+    statusDiv.textContent = 'Connected to server';
+});
+
+socket.on('disconnect', () => {
+    console.log('Disconnected from server');
+    statusDiv.textContent = 'Disconnected from server';
+    cleanupConnection();
+});
+
 async function startChat() {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localVideo.srcObject = localStream;
-        userId = Math.random().toString(36).substr(2, 9);
-        socket.emit('join', { userId });
+        socket.emit('join');
         startButton.disabled = true;
         nextButton.disabled = false;
         statusDiv.textContent = 'Waiting for a peer...';
@@ -35,21 +50,18 @@ async function startChat() {
 }
 
 function nextPeer() {
-    if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-    }
-    remoteVideo.srcObject = null;
-    socket.emit('join', { userId });
+    cleanupConnection();
+    socket.emit('join');
     statusDiv.textContent = 'Waiting for a peer...';
 }
 
 socket.on('matched', async (data) => {
+    console.log('Matched with peer:', data);
     currentRoom = data.room;
     statusDiv.textContent = 'Connected to peer';
-    createPeerConnection(data.partnerId);
     
     try {
+        await createPeerConnection(data.partnerId);
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         socket.emit('offer', {
@@ -58,6 +70,7 @@ socket.on('matched', async (data) => {
         });
     } catch (error) {
         console.error('Error creating offer:', error);
+        statusDiv.textContent = 'Connection failed';
     }
 });
 
@@ -66,11 +79,11 @@ socket.on('waiting', () => {
 });
 
 socket.on('offer', async (data) => {
-    if (!peerConnection) {
-        createPeerConnection(data.target);
-    }
-    
+    console.log('Received offer');
     try {
+        if (!peerConnection) {
+            await createPeerConnection(data.target);
+        }
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
@@ -80,10 +93,12 @@ socket.on('offer', async (data) => {
         });
     } catch (error) {
         console.error('Error handling offer:', error);
+        statusDiv.textContent = 'Connection failed';
     }
 });
 
 socket.on('answer', async (data) => {
+    console.log('Received answer');
     try {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
     } catch (error) {
@@ -92,6 +107,7 @@ socket.on('answer', async (data) => {
 });
 
 socket.on('ice-candidate', async (data) => {
+    console.log('Received ICE candidate');
     try {
         if (data.candidate) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
@@ -101,7 +117,17 @@ socket.on('ice-candidate', async (data) => {
     }
 });
 
-function createPeerConnection(partnerId) {
+socket.on('partner_disconnected', () => {
+    statusDiv.textContent = 'Partner disconnected';
+    cleanupConnection();
+});
+
+async function createPeerConnection(partnerId) {
+    if (peerConnection) {
+        cleanupConnection();
+    }
+
+    console.log('Creating peer connection');
     peerConnection = new RTCPeerConnection(configuration);
 
     peerConnection.onicecandidate = (event) => {
@@ -113,18 +139,31 @@ function createPeerConnection(partnerId) {
         }
     };
 
-    peerConnection.ontrack = (event) => {
-        remoteVideo.srcObject = event.streams[0];
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', peerConnection.iceConnectionState);
+        if (peerConnection.iceConnectionState === 'disconnected') {
+            statusDiv.textContent = 'Peer disconnected';
+            cleanupConnection();
+        }
     };
 
+    peerConnection.ontrack = (event) => {
+        console.log('Received remote track');
+        if (remoteVideo.srcObject !== event.streams[0]) {
+            remoteVideo.srcObject = event.streams[0];
+        }
+    };
+
+    // Add local tracks to the connection
     localStream.getTracks().forEach(track => {
         peerConnection.addTrack(track, localStream);
     });
+}
 
-    peerConnection.oniceconnectionstatechange = () => {
-        if (peerConnection.iceConnectionState === 'disconnected') {
-            statusDiv.textContent = 'Peer disconnected';
-            nextButton.disabled = false;
-        }
-    };
+function cleanupConnection() {
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+    }
+    remoteVideo.srcObject = null;
 }
