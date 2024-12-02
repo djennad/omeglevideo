@@ -1,4 +1,4 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit
 import logging
 import os
@@ -81,7 +81,8 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    logger.info(f"User {request.sid} connected")
+    logger.info(f"User {request.sid} connected from {request.remote_addr}")
+    emit('connection_status', {'status': 'connected', 'id': request.sid})
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -90,10 +91,12 @@ def handle_disconnect():
 
 @socketio.on('join')
 def handle_join():
+    logger.info(f"Join request from {request.sid}")
     user_manager.add_waiting_user(request.sid)
     match = user_manager.try_match_users()
     
     if match:
+        logger.info(f"Match found: {match}")
         # Notify both users of the match
         emit('matched', {
             'partnerId': match['user2'],
@@ -105,6 +108,7 @@ def handle_join():
             'room': match['room']
         }, room=match['user2'])
     else:
+        logger.info(f"No match found for {request.sid}, adding to waiting list")
         emit('waiting')
 
 @socketio.on('offer')
@@ -130,6 +134,11 @@ def handle_ice_candidate(data):
         'candidate': data['candidate'],
         'target': request.sid
     }, room=data['target'])
+
+@socketio.on_error()
+def error_handler(e):
+    logger.error(f"SocketIO error for {request.sid}: {str(e)}")
+    emit('error', {'message': 'An error occurred'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

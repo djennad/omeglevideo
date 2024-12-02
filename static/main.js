@@ -41,10 +41,20 @@ socket.on('connect', () => {
     statusDiv.textContent = 'Connected to server';
 });
 
+socket.on('connection_status', (data) => {
+    console.log('Connection status:', data);
+    statusDiv.textContent = `Connected (ID: ${data.id})`;
+});
+
 socket.on('disconnect', () => {
     console.log('Disconnected from server');
     statusDiv.textContent = 'Disconnected from server';
     cleanupConnection();
+});
+
+socket.on('error', (data) => {
+    console.error('Server error:', data.message);
+    statusDiv.textContent = `Error: ${data.message}`;
 });
 
 async function startChat() {
@@ -75,32 +85,35 @@ function nextPeer() {
     statusDiv.textContent = 'Waiting for a peer...';
 }
 
-socket.on('matched', async (data) => {
+socket.on('waiting', () => {
+    console.log('Waiting for a peer to connect');
+    statusDiv.textContent = 'Waiting for someone to join...';
+});
+
+socket.on('matched', (data) => {
     console.log('Matched with peer:', data);
+    statusDiv.textContent = 'Connected to peer - Starting video call...';
     currentRoom = data.room;
-    statusDiv.textContent = 'Connected to peer';
     
-    try {
-        await createPeerConnection(data.partnerId);
+    createPeerConnection(data.partnerId).then(() => {
         console.log('Creating offer for peer');
-        const offer = await peerConnection.createOffer({
+        return peerConnection.createOffer({
             offerToReceiveAudio: true,
             offerToReceiveVideo: true
         });
-        await peerConnection.setLocalDescription(offer);
+    }).then(offer => {
+        console.log('Setting local description');
+        return peerConnection.setLocalDescription(offer);
+    }).then(() => {
+        console.log('Sending offer to peer');
         socket.emit('offer', {
             target: data.partnerId,
-            sdp: offer
+            sdp: peerConnection.localDescription
         });
-    } catch (error) {
-        console.error('Error creating offer:', error);
-        statusDiv.textContent = 'Connection failed';
-    }
-});
-
-socket.on('waiting', () => {
-    console.log('Waiting for a peer to connect');
-    statusDiv.textContent = 'Waiting for a peer...';
+    }).catch(error => {
+        console.error('Error in connection setup:', error);
+        statusDiv.textContent = 'Failed to setup connection';
+    });
 });
 
 socket.on('offer', async (data) => {
