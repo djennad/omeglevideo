@@ -46,6 +46,14 @@ class UserManager:
                 del self.active_users[user_id]
                 logger.info(f"Removed user {user_id} from active users")
 
+    def next_user(self, user_id):
+        """Special method for handling 'next' button clicks"""
+        with self.lock:
+            # First remove the user from any existing connections
+            self.remove_user(user_id)
+            # Then add them to waiting list
+            return self.add_waiting_user(user_id)
+
     def try_match_users(self):
         with self.lock:
             logger.info(f"Trying to match users. Waiting users: {len(self.waiting_users)}")
@@ -123,6 +131,30 @@ def handle_join():
     else:
         logger.warning(f"User {user_id} already in waiting list or active")
         emit('error', {'message': 'Already waiting or in a chat'})
+
+@socketio.on('next')
+def handle_next():
+    user_id = request.sid
+    logger.info(f"Next request from {user_id}")
+    
+    if user_manager.next_user(user_id):
+        match = user_manager.try_match_users()
+        if match:
+            logger.info(f"Match found: {match}")
+            emit('matched', {
+                'partnerId': match['user2'],
+                'room': match['room'],
+                'initiator': match['initiator']
+            }, room=match['user1'])
+            
+            emit('matched', {
+                'partnerId': match['user1'],
+                'room': match['room'],
+                'initiator': match['initiator']
+            }, room=match['user2'])
+        else:
+            logger.info(f"No match found for {user_id}, waiting...")
+            emit('waiting')
 
 @socketio.on('offer')
 def handle_offer(data):

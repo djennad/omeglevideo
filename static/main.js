@@ -141,7 +141,7 @@ function nextPeer() {
     console.log('Looking for next peer');
     cleanupConnection();
     isWaiting = true;
-    socket.emit('join');
+    socket.emit('next');  
     statusDiv.textContent = 'Waiting for a peer...';
 }
 
