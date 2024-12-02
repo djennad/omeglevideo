@@ -2,12 +2,10 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import secrets
 import os
-from gevent import monkey
-monkey.patch_all()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secrets.token_hex(16)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent', logger=True, engineio_logger=True)
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True)
 
 # Store waiting users
 waiting_users = []
@@ -50,6 +48,5 @@ def on_disconnect():
     waiting_users = [user for user in waiting_users if user != request.sid]
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    print(f"Starting server on port {port}")
-    socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True)
+    port = int(os.environ.get("PORT", 5000))
+    socketio.run(app, host='0.0.0.0', port=port)
