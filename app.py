@@ -55,7 +55,7 @@ class UserManager:
                 return None
 
             # Get the first two waiting users
-            user1 = self.waiting_users[0]
+            user1 = self.waiting_users[0]  # This will be the initiator
             user2 = self.waiting_users[1]
 
             # Remove both users from waiting list
@@ -72,7 +72,12 @@ class UserManager:
             join_room(room, user1)
             join_room(room, user2)
             
-            return {'user1': user1, 'user2': user2, 'room': room}
+            return {
+                'user1': user1,
+                'user2': user2,
+                'room': room,
+                'initiator': user1  # user1 will always be the initiator
+            }
 
 user_manager = UserManager()
 
@@ -103,12 +108,14 @@ def handle_join():
             # Notify both users of the match
             emit('matched', {
                 'partnerId': match['user2'],
-                'room': match['room']
+                'room': match['room'],
+                'initiator': match['initiator']
             }, room=match['user1'])
             
             emit('matched', {
                 'partnerId': match['user1'],
-                'room': match['room']
+                'room': match['room'],
+                'initiator': match['initiator']
             }, room=match['user2'])
         else:
             logger.info(f"No match found for {user_id}, waiting...")

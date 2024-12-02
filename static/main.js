@@ -158,20 +158,27 @@ socket.on('matched', (data) => {
     isWaiting = false;
     
     createPeerConnection(data.partnerId).then(() => {
-        console.log('Creating offer for peer');
-        return peerConnection.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: true
-        });
+        // Only create offer if we're the initiator (user1)
+        if (socket.id === data.initiator) {
+            console.log('Creating offer as initiator');
+            return peerConnection.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+            });
+        }
     }).then(offer => {
-        console.log('Setting local description');
-        return peerConnection.setLocalDescription(offer);
+        if (offer) { // only if we created an offer
+            console.log('Setting local description');
+            return peerConnection.setLocalDescription(offer);
+        }
     }).then(() => {
-        console.log('Sending offer to peer');
-        socket.emit('offer', {
-            target: data.partnerId,
-            sdp: peerConnection.localDescription
-        });
+        if (socket.id === data.initiator) { // only if we're the initiator
+            console.log('Sending offer to peer');
+            socket.emit('offer', {
+                target: data.partnerId,
+                sdp: peerConnection.localDescription
+            });
+        }
     }).catch(error => {
         console.error('Error in connection setup:', error);
         statusDiv.textContent = 'Failed to setup connection';
@@ -186,9 +193,10 @@ socket.on('offer', async (data) => {
             await createPeerConnection(data.target);
         }
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        console.log('Creating answer for peer');
+        console.log('Creating answer');
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
+        console.log('Sending answer to peer');
         socket.emit('answer', {
             target: data.target,
             sdp: answer
@@ -202,8 +210,13 @@ socket.on('offer', async (data) => {
 socket.on('answer', async (data) => {
     console.log('Received answer from peer');
     try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        console.log('Remote description set successfully');
+        const desc = new RTCSessionDescription(data.sdp);
+        if (peerConnection.signalingState === "have-local-offer") {
+            await peerConnection.setRemoteDescription(desc);
+            console.log('Remote description set successfully');
+        } else {
+            console.warn('Received answer in wrong signaling state:', peerConnection.signalingState);
+        }
     } catch (error) {
         console.error('Error handling answer:', error);
     }
