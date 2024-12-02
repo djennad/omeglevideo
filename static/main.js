@@ -2,13 +2,15 @@ const socket = io({
     transports: ['websocket'],
     upgrade: false,
     reconnection: true,
-    reconnectionAttempts: 5
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000
 });
 
 let localStream;
 let peerConnection;
 let currentRoom;
 let isConnected = false;
+let isWaiting = false;
 
 const configuration = {
     iceServers: [
@@ -39,6 +41,7 @@ nextButton.addEventListener('click', nextPeer);
 socket.on('connect', () => {
     console.log('Connected to server with ID:', socket.id);
     statusDiv.textContent = 'Connected to server';
+    isConnected = true;
 });
 
 socket.on('connection_status', (data) => {
@@ -48,16 +51,36 @@ socket.on('connection_status', (data) => {
 
 socket.on('disconnect', () => {
     console.log('Disconnected from server');
-    statusDiv.textContent = 'Disconnected from server';
+    statusDiv.textContent = 'Disconnected from server - Trying to reconnect...';
+    isConnected = false;
     cleanupConnection();
 });
 
 socket.on('error', (data) => {
     console.error('Server error:', data.message);
     statusDiv.textContent = `Error: ${data.message}`;
+    if (data.message === 'Already waiting or in a chat') {
+        cleanupConnection();
+        isWaiting = false;
+    }
+});
+
+socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+    statusDiv.textContent = 'Connection error - Please check your internet connection';
 });
 
 async function startChat() {
+    if (!isConnected) {
+        statusDiv.textContent = 'Not connected to server - Please wait...';
+        return;
+    }
+
+    if (isWaiting) {
+        statusDiv.textContent = 'Already waiting for a peer...';
+        return;
+    }
+
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ 
             video: { 
@@ -68,6 +91,8 @@ async function startChat() {
         });
         localVideo.srcObject = localStream;
         console.log('Local stream acquired successfully');
+        
+        isWaiting = true;
         socket.emit('join');
         startButton.disabled = true;
         nextButton.disabled = false;
@@ -75,12 +100,19 @@ async function startChat() {
     } catch (error) {
         console.error('Error accessing media devices:', error);
         statusDiv.textContent = 'Error accessing camera/microphone';
+        isWaiting = false;
     }
 }
 
 function nextPeer() {
+    if (!isConnected) {
+        statusDiv.textContent = 'Not connected to server - Please wait...';
+        return;
+    }
+
     console.log('Looking for next peer');
     cleanupConnection();
+    isWaiting = true;
     socket.emit('join');
     statusDiv.textContent = 'Waiting for a peer...';
 }
@@ -88,12 +120,14 @@ function nextPeer() {
 socket.on('waiting', () => {
     console.log('Waiting for a peer to connect');
     statusDiv.textContent = 'Waiting for someone to join...';
+    isWaiting = true;
 });
 
 socket.on('matched', (data) => {
     console.log('Matched with peer:', data);
     statusDiv.textContent = 'Connected to peer - Starting video call...';
     currentRoom = data.room;
+    isWaiting = false;
     
     createPeerConnection(data.partnerId).then(() => {
         console.log('Creating offer for peer');
@@ -113,6 +147,7 @@ socket.on('matched', (data) => {
     }).catch(error => {
         console.error('Error in connection setup:', error);
         statusDiv.textContent = 'Failed to setup connection';
+        cleanupConnection();
     });
 });
 
@@ -160,8 +195,9 @@ socket.on('ice-candidate', async (data) => {
 
 socket.on('partner_disconnected', () => {
     console.log('Partner disconnected');
-    statusDiv.textContent = 'Partner disconnected';
+    statusDiv.textContent = 'Partner disconnected - Click Next to find another partner';
     cleanupConnection();
+    isWaiting = false;
 });
 
 async function createPeerConnection(partnerId) {

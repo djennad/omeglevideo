@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
 import os
 from threading import Lock
@@ -20,12 +20,14 @@ class UserManager:
 
     def add_waiting_user(self, user_id):
         with self.lock:
-            if user_id in self.waiting_users:
-                return
-            if user_id in self.active_users:
-                return
+            # Don't add if already waiting or active
+            if user_id in self.waiting_users or user_id in self.active_users:
+                logger.info(f"User {user_id} already in waiting list or active")
+                return False
+            
             self.waiting_users.append(user_id)
             logger.info(f"Added user {user_id} to waiting list. Current waiting: {len(self.waiting_users)}")
+            return True
 
     def remove_user(self, user_id):
         with self.lock:
@@ -46,31 +48,41 @@ class UserManager:
 
     def try_match_users(self):
         with self.lock:
+            logger.info(f"Trying to match users. Waiting users: {len(self.waiting_users)}")
+            
             if len(self.waiting_users) < 2:
+                logger.info("Not enough users to make a match")
                 return None
 
-            user1 = self.waiting_users.pop(0)
-            user2 = self.waiting_users.pop(0)
+            # Get the first two waiting users
+            user1 = self.waiting_users[0]
+            user2 = self.waiting_users[1]
 
-            # Double check users are still connected
+            # Verify both users are still connected
             if not socketio.server.manager.is_connected(user1):
-                logger.info(f"User {user1} no longer connected during matching")
-                if socketio.server.manager.is_connected(user2):
-                    self.waiting_users.insert(0, user2)
+                logger.info(f"User {user1} is no longer connected")
+                self.waiting_users.remove(user1)
                 return None
 
             if not socketio.server.manager.is_connected(user2):
-                logger.info(f"User {user2} no longer connected during matching")
-                if socketio.server.manager.is_connected(user1):
-                    self.waiting_users.insert(0, user1)
+                logger.info(f"User {user2} is no longer connected")
+                self.waiting_users.remove(user2)
                 return None
 
-            # Create the match
+            # Remove both users from waiting list
+            self.waiting_users = self.waiting_users[2:]
+
+            # Add them to active users
             self.active_users[user1] = user2
             self.active_users[user2] = user1
             
             room = f"room_{user1}_{user2}"
-            logger.info(f"Matched users {user1} and {user2} in room {room}")
+            logger.info(f"Successfully matched users {user1} and {user2} in room {room}")
+            
+            # Make both users join the room
+            join_room(room, user1)
+            join_room(room, user2)
+            
             return {'user1': user1, 'user2': user2, 'room': room}
 
 user_manager = UserManager()
@@ -81,7 +93,7 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    logger.info(f"User {request.sid} connected from {request.remote_addr}")
+    logger.info(f"User {request.sid} connected")
     emit('connection_status', {'status': 'connected', 'id': request.sid})
 
 @socketio.on('disconnect')
@@ -91,25 +103,30 @@ def handle_disconnect():
 
 @socketio.on('join')
 def handle_join():
-    logger.info(f"Join request from {request.sid}")
-    user_manager.add_waiting_user(request.sid)
-    match = user_manager.try_match_users()
+    user_id = request.sid
+    logger.info(f"Join request from {user_id}")
     
-    if match:
-        logger.info(f"Match found: {match}")
-        # Notify both users of the match
-        emit('matched', {
-            'partnerId': match['user2'],
-            'room': match['room']
-        }, room=match['user1'])
+    if user_manager.add_waiting_user(user_id):
+        match = user_manager.try_match_users()
         
-        emit('matched', {
-            'partnerId': match['user1'],
-            'room': match['room']
-        }, room=match['user2'])
+        if match:
+            logger.info(f"Match found: {match}")
+            # Notify both users of the match
+            emit('matched', {
+                'partnerId': match['user2'],
+                'room': match['room']
+            }, room=match['user1'])
+            
+            emit('matched', {
+                'partnerId': match['user1'],
+                'room': match['room']
+            }, room=match['user2'])
+        else:
+            logger.info(f"No match found for {user_id}, waiting...")
+            emit('waiting')
     else:
-        logger.info(f"No match found for {request.sid}, adding to waiting list")
-        emit('waiting')
+        logger.warning(f"User {user_id} already in waiting list or active")
+        emit('error', {'message': 'Already waiting or in a chat'})
 
 @socketio.on('offer')
 def handle_offer(data):
@@ -138,7 +155,7 @@ def handle_ice_candidate(data):
 @socketio.on_error()
 def error_handler(e):
     logger.error(f"SocketIO error for {request.sid}: {str(e)}")
-    emit('error', {'message': 'An error occurred'})
+    emit('error', {'message': str(e)})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
