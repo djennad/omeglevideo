@@ -140,11 +140,32 @@ def handle_join():
         logger.warning(f"User {user_id} already in waiting list or active")
         emit('error', {'message': 'Already waiting or in a chat'})
 
+@socketio.on('check_users')
+def handle_check_users():
+    """Check if there are other users available"""
+    user_id = request.sid
+    with user_manager.lock:
+        # Count other users (excluding current user)
+        other_waiting = len([u for u in user_manager.waiting_users if u != user_id])
+        other_active = len([u for u in user_manager.active_users if u != user_id]) // 2
+        has_users = (other_waiting + other_active) > 0
+        logger.info(f"Checking users for {user_id}: other_waiting={other_waiting}, other_active={other_active}")
+        return {'hasUsers': has_users}
+
 @socketio.on('next')
 def handle_next():
     user_id = request.sid
     logger.info(f"Next request from {user_id}")
     
+    # First check if there are other users
+    with user_manager.lock:
+        other_waiting = len([u for u in user_manager.waiting_users if u != user_id])
+        other_active = len([u for u in user_manager.active_users if u != user_id]) // 2
+        if (other_waiting + other_active) == 0:
+            logger.info(f"No other users online for {user_id}")
+            emit('error', {'message': 'no other users online'})
+            return
+
     success, error_message = user_manager.next_user(user_id)
     if not success:
         logger.warning(f"Next failed for {user_id}: {error_message}")
@@ -167,14 +188,8 @@ def handle_next():
             'initiator': match['initiator']
         }, room=match['user2'])
     else:
-        # No immediate match found
-        total_users = len(user_manager.waiting_users) + len(user_manager.active_users) // 2
-        if total_users <= 1:  # if user is alone
-            logger.info(f"No other users online for {user_id}")
-            emit('error', {'message': 'no other users online'})
-        else:
-            logger.info(f"No match found for {user_id}, waiting...")
-            emit('waiting')
+        logger.info(f"No match found for {user_id}, waiting...")
+        emit('waiting')
 
 @socketio.on('offer')
 def handle_offer(data):

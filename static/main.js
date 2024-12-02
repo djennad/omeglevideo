@@ -67,9 +67,12 @@ socket.on('disconnect', () => {
 socket.on('error', (data) => {
     console.error('Server error:', data.message);
     if (data.message.includes('no other users')) {
-        statusDiv.textContent = 'No other users online - Waiting for someone to join...';
-    } else if (data.message === 'timeout') {
-        statusDiv.textContent = 'No other users online right now - Waiting for someone to join...';
+        statusDiv.textContent = 'No other users online - Staying in current chat';
+        setTimeout(() => {
+            if (peerConnection) {
+                statusDiv.textContent = 'Connected to peer';
+            }
+        }, 3000);
     } else {
         statusDiv.textContent = 'Error: ' + data.message;
     }
@@ -148,21 +151,23 @@ function nextPeer() {
         return;
     }
 
-    console.log('Looking for next peer');
-    cleanupConnection();
-    isWaiting = true;
-    statusDiv.textContent = 'Looking for next person...';
-    
-    // Add timeout handling
-    let nextTimeout = setTimeout(() => {
-        if (isWaiting) {
-            console.log('No users found after timeout');
-            statusDiv.textContent = 'No other users online right now - Waiting for someone to join...';
+    // First check if there are other users online
+    socket.emit('check_users', (response) => {
+        if (response.hasUsers) {
+            console.log('Looking for next peer');
+            cleanupConnection();
+            isWaiting = true;
+            statusDiv.textContent = 'Looking for next person...';
+            socket.emit('next');
+        } else {
+            console.log('No other users online, staying in current connection');
+            statusDiv.textContent = 'No other users online right now - Staying in current chat';
+            setTimeout(() => {
+                if (peerConnection) {
+                    statusDiv.textContent = 'Connected to peer';
+                }
+            }, 3000);
         }
-    }, 5000); // 5 second timeout
-
-    socket.emit('next', () => {
-        clearTimeout(nextTimeout);
     });
 }
 
