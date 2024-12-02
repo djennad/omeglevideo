@@ -52,14 +52,17 @@ class UserManager:
             # First remove the user from any existing connections
             self.remove_user(user_id)
             
-            # Check if there are any other users waiting
-            other_users = [u for u in self.waiting_users if u != user_id]
-            if not other_users and not self.active_users:
+            # Check if there are any other users waiting or in active chats
+            other_users = len([u for u in self.waiting_users if u != user_id])
+            other_active = len(self.active_users) // 2  # divide by 2 since each active user is counted twice
+            
+            if other_users == 0 and other_active == 0:
                 logger.info(f"No other users available for {user_id}")
                 return False, "no other users online"
             
             # Then add them to waiting list
             if self.add_waiting_user(user_id):
+                logger.info(f"User {user_id} added to waiting list. Total waiting: {len(self.waiting_users)}")
                 return True, None
             return False, "already in waiting list"
 
@@ -143,27 +146,35 @@ def handle_next():
     logger.info(f"Next request from {user_id}")
     
     success, error_message = user_manager.next_user(user_id)
-    if success:
-        match = user_manager.try_match_users()
-        if match:
-            logger.info(f"Match found: {match}")
-            emit('matched', {
-                'partnerId': match['user2'],
-                'room': match['room'],
-                'initiator': match['initiator']
-            }, room=match['user1'])
-            
-            emit('matched', {
-                'partnerId': match['user1'],
-                'room': match['room'],
-                'initiator': match['initiator']
-            }, room=match['user2'])
+    if not success:
+        logger.warning(f"Next failed for {user_id}: {error_message}")
+        emit('error', {'message': error_message})
+        return
+
+    # Try to find a match immediately
+    match = user_manager.try_match_users()
+    if match:
+        logger.info(f"Match found: {match}")
+        emit('matched', {
+            'partnerId': match['user2'],
+            'room': match['room'],
+            'initiator': match['initiator']
+        }, room=match['user1'])
+        
+        emit('matched', {
+            'partnerId': match['user1'],
+            'room': match['room'],
+            'initiator': match['initiator']
+        }, room=match['user2'])
+    else:
+        # No immediate match found
+        total_users = len(user_manager.waiting_users) + len(user_manager.active_users) // 2
+        if total_users <= 1:  # if user is alone
+            logger.info(f"No other users online for {user_id}")
+            emit('error', {'message': 'no other users online'})
         else:
             logger.info(f"No match found for {user_id}, waiting...")
             emit('waiting')
-    else:
-        logger.warning(f"Next failed for {user_id}: {error_message}")
-        emit('error', {'message': error_message})
 
 @socketio.on('offer')
 def handle_offer(data):

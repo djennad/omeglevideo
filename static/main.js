@@ -52,7 +52,11 @@ socket.on('connection_status', (data) => {
 
 socket.on('disconnect', () => {
     console.log('Disconnected from server');
-    statusDiv.textContent = 'Disconnected - Please refresh the page';
+    if (isWaiting) {
+        statusDiv.textContent = 'No other users online - Waiting for someone to join...';
+    } else {
+        statusDiv.textContent = 'Disconnected - Please refresh the page';
+    }
     isConnected = false;
     isWaiting = false;
     startButton.disabled = true;
@@ -64,6 +68,8 @@ socket.on('error', (data) => {
     console.error('Server error:', data.message);
     if (data.message.includes('no other users')) {
         statusDiv.textContent = 'No other users online - Waiting for someone to join...';
+    } else if (data.message === 'timeout') {
+        statusDiv.textContent = 'No other users online right now - Waiting for someone to join...';
     } else {
         statusDiv.textContent = 'Error: ' + data.message;
     }
@@ -77,7 +83,11 @@ socket.on('error', (data) => {
 
 socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
-    statusDiv.textContent = 'Connection error - Please refresh the page';
+    if (error.message === 'timeout') {
+        statusDiv.textContent = 'No other users online right now - Waiting for someone to join...';
+    } else {
+        statusDiv.textContent = 'Connection error - Please refresh the page';
+    }
     isConnected = false;
 });
 
@@ -134,15 +144,26 @@ async function startChat() {
 
 function nextPeer() {
     if (!isConnected) {
-        statusDiv.textContent = 'Not connected to server - Please wait...';
+        statusDiv.textContent = 'Not connected to server - Please refresh the page';
         return;
     }
 
     console.log('Looking for next peer');
     cleanupConnection();
     isWaiting = true;
-    socket.emit('next');  
-    statusDiv.textContent = 'Waiting for a peer...';
+    statusDiv.textContent = 'Looking for next person...';
+    
+    // Add timeout handling
+    let nextTimeout = setTimeout(() => {
+        if (isWaiting) {
+            console.log('No users found after timeout');
+            statusDiv.textContent = 'No other users online right now - Waiting for someone to join...';
+        }
+    }, 5000); // 5 second timeout
+
+    socket.emit('next', () => {
+        clearTimeout(nextTimeout);
+    });
 }
 
 socket.on('waiting', () => {
