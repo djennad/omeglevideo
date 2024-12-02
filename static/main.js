@@ -262,9 +262,21 @@ socket.on('ice-candidate', async (data) => {
 
 socket.on('partner_disconnected', () => {
     console.log('Partner disconnected');
-    statusDiv.textContent = 'Partner disconnected - Click Next to find another partner';
-    cleanupConnection();
-    isWaiting = false;
+    // Check if there are other users before cleaning up
+    socket.emit('check_users', (response) => {
+        if (response.hasUsers) {
+            console.log('Other users online, looking for next partner');
+            cleanupConnection();
+            isWaiting = true;
+            statusDiv.textContent = 'Partner left - Looking for a new person...';
+            socket.emit('next');
+        } else {
+            console.log('No other users online, keeping connection ready');
+            statusDiv.textContent = 'Partner left - Waiting for new users to join...';
+            // Don't cleanup connection, just wait for new users
+            isWaiting = true;
+        }
+    });
 });
 
 async function createPeerConnection(partnerId) {
@@ -310,10 +322,28 @@ async function createPeerConnection(partnerId) {
 }
 
 function cleanupConnection() {
+    console.log('Cleaning up peer connection');
     if (peerConnection) {
-        console.log('Cleaning up peer connection');
-        peerConnection.close();
-        peerConnection = null;
+        // Close all tracks but keep the connection
+        const senders = peerConnection.getSenders();
+        senders.forEach(sender => {
+            if (sender.track) {
+                sender.track.stop();
+            }
+        });
+        
+        // Only close the connection if we're sure we want to disconnect
+        if (!isWaiting) {
+            peerConnection.close();
+            peerConnection = null;
+        }
     }
-    remoteVideo.srcObject = null;
+    
+    // Clear remote video
+    const remoteVideo = document.getElementById('remoteVideo');
+    if (remoteVideo.srcObject) {
+        const tracks = remoteVideo.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+        remoteVideo.srcObject = null;
+    }
 }

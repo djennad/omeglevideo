@@ -31,20 +31,28 @@ class UserManager:
 
     def remove_user(self, user_id):
         with self.lock:
-            # Remove from waiting list
+            # Remove from waiting list if present
             if user_id in self.waiting_users:
                 self.waiting_users.remove(user_id)
                 logger.info(f"Removed user {user_id} from waiting list")
 
-            # Remove from active users and notify partner
+            # Handle active users
             if user_id in self.active_users:
                 partner_id = self.active_users[user_id]
+                
+                # Check if there are other users before notifying partner
+                other_waiting = len([u for u in self.waiting_users if u != partner_id])
+                other_active = len([u for u in self.active_users if u != user_id and u != partner_id]) // 2
+                has_other_users = (other_waiting + other_active) > 0
+                
+                # Remove from active users
                 if partner_id in self.active_users:
                     del self.active_users[partner_id]
-                    emit('partner_disconnected', room=partner_id)
-                    logger.info(f"Notified partner {partner_id} of disconnection")
                 del self.active_users[user_id]
-                logger.info(f"Removed user {user_id} from active users")
+                
+                # Notify partner with current user count
+                emit('partner_disconnected', room=partner_id)
+                logger.info(f"Notified partner {partner_id} of disconnection. Other users available: {has_other_users}")
 
     def next_user(self, user_id):
         """Special method for handling 'next' button clicks"""
