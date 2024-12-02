@@ -32,8 +32,8 @@ def on_join(data):
     logger.info(f'Join request from user {user_id}. Waiting users: {len(waiting_users)}')
     
     # Remove disconnected users from waiting list
-    global waiting_users
-    waiting_users = [uid for uid in waiting_users if uid in active_users and active_users[uid]['connected']]
+    global waiting_users, active_users
+    waiting_users[:] = [uid for uid in waiting_users if uid in active_users and active_users[uid]['connected']]
     
     if waiting_users and user_id not in waiting_users:
         # Match with first waiting user
@@ -50,7 +50,7 @@ def on_join(data):
             emit('matched', {'room': room, 'partnerId': partner_id}, to=user_id)
             emit('matched', {'room': room, 'partnerId': user_id}, to=partner_id)
         else:
-            waiting_users = [uid for uid in waiting_users if uid != partner_id]
+            waiting_users[:] = [uid for uid in waiting_users if uid != partner_id]
             emit('waiting')
     else:
         # Add to waiting list if not already waiting
