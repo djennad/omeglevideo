@@ -3,7 +3,7 @@ services:
     name: omeglevideo
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 wsgi:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
