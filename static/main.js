@@ -1,4 +1,10 @@
-const socket = io();
+const socket = io({
+    transports: ['websocket'],
+    upgrade: false,
+    reconnection: true,
+    reconnectionAttempts: 5
+});
+
 let localStream;
 let peerConnection;
 let currentRoom;
@@ -10,8 +16,14 @@ const configuration = {
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
-    ]
+        { urls: 'stun:stun4.l.google.com:19302' },
+        {
+            urls: 'turn:numb.viagenie.ca',
+            username: 'webrtc@live.com',
+            credential: 'muazkh'
+        }
+    ],
+    iceCandidatePoolSize: 10
 };
 
 const startButton = document.getElementById('startButton');
@@ -25,7 +37,7 @@ nextButton.addEventListener('click', nextPeer);
 
 // Socket connection status
 socket.on('connect', () => {
-    console.log('Connected to server');
+    console.log('Connected to server with ID:', socket.id);
     statusDiv.textContent = 'Connected to server';
 });
 
@@ -37,8 +49,15 @@ socket.on('disconnect', () => {
 
 async function startChat() {
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                width: { ideal: 640 },
+                height: { ideal: 480 }
+            }, 
+            audio: true 
+        });
         localVideo.srcObject = localStream;
+        console.log('Local stream acquired successfully');
         socket.emit('join');
         startButton.disabled = true;
         nextButton.disabled = false;
@@ -50,6 +69,7 @@ async function startChat() {
 }
 
 function nextPeer() {
+    console.log('Looking for next peer');
     cleanupConnection();
     socket.emit('join');
     statusDiv.textContent = 'Waiting for a peer...';
@@ -62,7 +82,11 @@ socket.on('matched', async (data) => {
     
     try {
         await createPeerConnection(data.partnerId);
-        const offer = await peerConnection.createOffer();
+        console.log('Creating offer for peer');
+        const offer = await peerConnection.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: true
+        });
         await peerConnection.setLocalDescription(offer);
         socket.emit('offer', {
             target: data.partnerId,
@@ -75,16 +99,18 @@ socket.on('matched', async (data) => {
 });
 
 socket.on('waiting', () => {
+    console.log('Waiting for a peer to connect');
     statusDiv.textContent = 'Waiting for a peer...';
 });
 
 socket.on('offer', async (data) => {
-    console.log('Received offer');
+    console.log('Received offer from peer');
     try {
         if (!peerConnection) {
             await createPeerConnection(data.target);
         }
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        console.log('Creating answer for peer');
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
         socket.emit('answer', {
@@ -98,9 +124,10 @@ socket.on('offer', async (data) => {
 });
 
 socket.on('answer', async (data) => {
-    console.log('Received answer');
+    console.log('Received answer from peer');
     try {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        console.log('Remote description set successfully');
     } catch (error) {
         console.error('Error handling answer:', error);
     }
@@ -111,6 +138,7 @@ socket.on('ice-candidate', async (data) => {
     try {
         if (data.candidate) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+            console.log('Added ICE candidate successfully');
         }
     } catch (error) {
         console.error('Error adding ice candidate:', error);
@@ -118,6 +146,7 @@ socket.on('ice-candidate', async (data) => {
 });
 
 socket.on('partner_disconnected', () => {
+    console.log('Partner disconnected');
     statusDiv.textContent = 'Partner disconnected';
     cleanupConnection();
 });
@@ -127,11 +156,12 @@ async function createPeerConnection(partnerId) {
         cleanupConnection();
     }
 
-    console.log('Creating peer connection');
+    console.log('Creating new peer connection');
     peerConnection = new RTCPeerConnection(configuration);
 
     peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
+            console.log('Sending ICE candidate to peer');
             socket.emit('ice-candidate', {
                 target: partnerId,
                 candidate: event.candidate
@@ -141,8 +171,9 @@ async function createPeerConnection(partnerId) {
 
     peerConnection.oniceconnectionstatechange = () => {
         console.log('ICE connection state:', peerConnection.iceConnectionState);
-        if (peerConnection.iceConnectionState === 'disconnected') {
-            statusDiv.textContent = 'Peer disconnected';
+        if (peerConnection.iceConnectionState === 'disconnected' || 
+            peerConnection.iceConnectionState === 'failed') {
+            statusDiv.textContent = 'Peer connection lost';
             cleanupConnection();
         }
     };
@@ -151,17 +182,20 @@ async function createPeerConnection(partnerId) {
         console.log('Received remote track');
         if (remoteVideo.srcObject !== event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
+            console.log('Set remote video stream');
         }
     };
 
     // Add local tracks to the connection
     localStream.getTracks().forEach(track => {
+        console.log('Adding local track to peer connection:', track.kind);
         peerConnection.addTrack(track, localStream);
     });
 }
 
 function cleanupConnection() {
     if (peerConnection) {
+        console.log('Cleaning up peer connection');
         peerConnection.close();
         peerConnection = null;
     }
