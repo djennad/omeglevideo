@@ -41,9 +41,8 @@ nextButton.addEventListener('click', nextPeer);
 // Socket connection status
 socket.on('connect', () => {
     console.log('Connected to server with ID:', socket.id);
-    statusDiv.textContent = 'Connected to server';
     isConnected = true;
-    startButton.disabled = false;
+    statusDiv.textContent = 'Connected to server';
 });
 
 socket.on('connection_status', (data) => {
@@ -53,7 +52,7 @@ socket.on('connection_status', (data) => {
 
 socket.on('disconnect', () => {
     console.log('Disconnected from server');
-    statusDiv.textContent = 'Disconnected from server - Trying to reconnect...';
+    statusDiv.textContent = 'Disconnected - Please refresh the page';
     isConnected = false;
     isWaiting = false;
     startButton.disabled = true;
@@ -63,7 +62,11 @@ socket.on('disconnect', () => {
 
 socket.on('error', (data) => {
     console.error('Server error:', data.message);
-    statusDiv.textContent = `Error: ${data.message}`;
+    if (data.message.includes('no other users')) {
+        statusDiv.textContent = 'No other users online - Waiting for someone to join...';
+    } else {
+        statusDiv.textContent = 'Error: ' + data.message;
+    }
     if (data.message === 'Already waiting or in a chat') {
         cleanupConnection();
         isWaiting = false;
@@ -74,11 +77,8 @@ socket.on('error', (data) => {
 
 socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
-    statusDiv.textContent = 'Connection error - Please check your internet connection';
+    statusDiv.textContent = 'Connection error - Please refresh the page';
     isConnected = false;
-    isWaiting = false;
-    startButton.disabled = true;
-    nextButton.disabled = true;
 });
 
 socket.on('reconnect', (attemptNumber) => {

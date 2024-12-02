@@ -51,8 +51,17 @@ class UserManager:
         with self.lock:
             # First remove the user from any existing connections
             self.remove_user(user_id)
+            
+            # Check if there are any other users waiting
+            other_users = [u for u in self.waiting_users if u != user_id]
+            if not other_users and not self.active_users:
+                logger.info(f"No other users available for {user_id}")
+                return False, "no other users online"
+            
             # Then add them to waiting list
-            return self.add_waiting_user(user_id)
+            if self.add_waiting_user(user_id):
+                return True, None
+            return False, "already in waiting list"
 
     def try_match_users(self):
         with self.lock:
@@ -75,10 +84,6 @@ class UserManager:
             
             room = f"room_{user1}_{user2}"
             logger.info(f"Successfully matched users {user1} and {user2} in room {room}")
-            
-            # Make both users join the room
-            join_room(room, user1)
-            join_room(room, user2)
             
             return {
                 'user1': user1,
@@ -137,7 +142,8 @@ def handle_next():
     user_id = request.sid
     logger.info(f"Next request from {user_id}")
     
-    if user_manager.next_user(user_id):
+    success, error_message = user_manager.next_user(user_id)
+    if success:
         match = user_manager.try_match_users()
         if match:
             logger.info(f"Match found: {match}")
@@ -155,6 +161,9 @@ def handle_next():
         else:
             logger.info(f"No match found for {user_id}, waiting...")
             emit('waiting')
+    else:
+        logger.warning(f"Next failed for {user_id}: {error_message}")
+        emit('error', {'message': error_message})
 
 @socketio.on('offer')
 def handle_offer(data):
