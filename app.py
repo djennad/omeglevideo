@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 import logging
 import os
 from threading import Lock
@@ -57,17 +57,6 @@ class UserManager:
             # Get the first two waiting users
             user1 = self.waiting_users[0]
             user2 = self.waiting_users[1]
-
-            # Verify both users are still connected
-            if not socketio.server.manager.is_connected(user1):
-                logger.info(f"User {user1} is no longer connected")
-                self.waiting_users.remove(user1)
-                return None
-
-            if not socketio.server.manager.is_connected(user2):
-                logger.info(f"User {user2} is no longer connected")
-                self.waiting_users.remove(user2)
-                return None
 
             # Remove both users from waiting list
             self.waiting_users = self.waiting_users[2:]

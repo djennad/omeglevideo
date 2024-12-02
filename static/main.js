@@ -3,7 +3,8 @@ const socket = io({
     upgrade: false,
     reconnection: true,
     reconnectionAttempts: 5,
-    reconnectionDelay: 1000
+    reconnectionDelay: 1000,
+    timeout: 10000
 });
 
 let localStream;
@@ -42,6 +43,7 @@ socket.on('connect', () => {
     console.log('Connected to server with ID:', socket.id);
     statusDiv.textContent = 'Connected to server';
     isConnected = true;
+    startButton.disabled = false;
 });
 
 socket.on('connection_status', (data) => {
@@ -53,6 +55,9 @@ socket.on('disconnect', () => {
     console.log('Disconnected from server');
     statusDiv.textContent = 'Disconnected from server - Trying to reconnect...';
     isConnected = false;
+    isWaiting = false;
+    startButton.disabled = true;
+    nextButton.disabled = true;
     cleanupConnection();
 });
 
@@ -62,12 +67,35 @@ socket.on('error', (data) => {
     if (data.message === 'Already waiting or in a chat') {
         cleanupConnection();
         isWaiting = false;
+        startButton.disabled = false;
+        nextButton.disabled = true;
     }
 });
 
 socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
     statusDiv.textContent = 'Connection error - Please check your internet connection';
+    isConnected = false;
+    isWaiting = false;
+    startButton.disabled = true;
+    nextButton.disabled = true;
+});
+
+socket.on('reconnect', (attemptNumber) => {
+    console.log('Reconnected after', attemptNumber, 'attempts');
+    statusDiv.textContent = 'Reconnected to server';
+    isConnected = true;
+    startButton.disabled = false;
+});
+
+socket.on('reconnect_error', (error) => {
+    console.error('Reconnection error:', error);
+    statusDiv.textContent = 'Failed to reconnect - Please refresh the page';
+});
+
+socket.on('reconnect_failed', () => {
+    console.error('Failed to reconnect');
+    statusDiv.textContent = 'Failed to reconnect - Please refresh the page';
 });
 
 async function startChat() {
