@@ -13,6 +13,7 @@ let currentRoom;
 let isConnected = false;
 let isWaiting = false;
 
+// WebRTC configuration
 const configuration = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -21,12 +22,28 @@ const configuration = {
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' },
         {
-            urls: 'turn:numb.viagenie.ca',
-            username: 'webrtc@live.com',
-            credential: 'muazkh'
+            urls: 'turn:a.relay.metered.ca:80',
+            username: '83e4a0df687f3fd5e777f491',
+            credential: 'L8YhnBwZ+q1Ey7Yc',
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:80?transport=tcp',
+            username: '83e4a0df687f3fd5e777f491',
+            credential: 'L8YhnBwZ+q1Ey7Yc',
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:443',
+            username: '83e4a0df687f3fd5e777f491',
+            credential: 'L8YhnBwZ+q1Ey7Yc',
+        },
+        {
+            urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+            username: '83e4a0df687f3fd5e777f491',
+            credential: 'L8YhnBwZ+q1Ey7Yc',
         }
     ],
-    iceCandidatePoolSize: 10
+    iceCandidatePoolSize: 10,
+    iceTransportPolicy: 'all'
 };
 
 const startButton = document.getElementById('startButton');
@@ -281,116 +298,111 @@ socket.on('partner_disconnected', () => {
 
 async function createPeerConnection(partnerId) {
     console.log('Creating new peer connection');
-    const configuration = {
-        iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' }
-        ]
-    };
-
-    peerConnection = new RTCPeerConnection(configuration);
-    
-    // Add all tracks from local stream to peer connection
-    localStream.getTracks().forEach(track => {
-        console.log('Adding local track to peer connection:', track.kind);
-        peerConnection.addTrack(track, localStream);
-    });
-
-    // Handle incoming tracks
-    peerConnection.ontrack = (event) => {
-        console.log('Received remote track:', event.track.kind);
-        const [remoteStream] = event.streams;
-        const remoteVideo = document.getElementById('remoteVideo');
+    try {
+        peerConnection = new RTCPeerConnection(configuration);
+        console.log('Created peer connection with config:', configuration);
         
-        if (remoteStream && remoteVideo) {
-            console.log('Setting remote video stream');
-            
-            // Set the stream immediately
-            if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id) {
-                remoteVideo.srcObject = remoteStream;
-                console.log('New stream set:', remoteStream.id);
-                
-                // Log tracks in the stream
-                remoteStream.getTracks().forEach(track => {
-                    console.log(`Remote track: ${track.kind}, enabled: ${track.enabled}, state: ${track.readyState}`);
-                });
+        // Add all tracks from local stream to peer connection
+        localStream.getTracks().forEach(track => {
+            console.log('Adding local track to peer connection:', track.kind);
+            peerConnection.addTrack(track, localStream);
+        });
 
-                // Try to play immediately
-                const playPromise = remoteVideo.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(error => {
-                        console.log('Immediate play failed, waiting for user interaction:', error);
-                        // Add a play button if needed
-                        remoteVideo.setAttribute('controls', '');
-                    });
-                }
-            }
-            
-            // Also try to play when metadata is loaded
-            remoteVideo.onloadedmetadata = () => {
-                console.log('Remote video metadata loaded, attempting to play');
-                remoteVideo.play()
-                    .then(() => {
-                        console.log('Remote video playing successfully');
-                        remoteVideo.removeAttribute('controls');
-                        statusDiv.textContent = 'Connected to peer';
-                        isWaiting = false;
-                    })
-                    .catch(error => {
-                        console.error('Error playing remote video:', error);
-                        // Show controls if autoplay fails
-                        remoteVideo.setAttribute('controls', '');
-                    });
-            };
-
-            // Additional event listeners for debugging
-            remoteVideo.onplay = () => console.log('Remote video play event fired');
-            remoteVideo.onplaying = () => console.log('Remote video playing event fired');
-            remoteVideo.onwaiting = () => console.log('Remote video waiting for data');
-            remoteVideo.onstalled = () => console.log('Remote video stalled');
-        } else {
-            console.error('Missing remote stream or video element');
-        }
-    };
-
-    // ICE candidate handling
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            console.log('Sending ICE candidate to peer');
-            socket.emit('ice_candidate', {
-                target: partnerId,
-                candidate: event.candidate
-            });
-        }
-    };
-
-    // Connection state handling
-    peerConnection.oniceconnectionstatechange = () => {
-        console.log('ICE connection state:', peerConnection.iceConnectionState);
-        if (peerConnection.iceConnectionState === 'connected') {
-            console.log('ICE connection established');
+        // Handle incoming tracks
+        peerConnection.ontrack = (event) => {
+            console.log('Received remote track:', event.track.kind);
+            const [remoteStream] = event.streams;
             const remoteVideo = document.getElementById('remoteVideo');
-            if (remoteVideo.srcObject) {
-                remoteVideo.play()
-                    .then(() => {
-                        console.log('Remote video playing after ICE connection');
-                        remoteVideo.removeAttribute('controls');
-                    })
-                    .catch(e => {
-                        console.error('Error playing video after ICE connection:', e);
-                        remoteVideo.setAttribute('controls', '');
+            
+            if (remoteStream && remoteVideo) {
+                console.log('Setting remote video stream');
+                
+                // Set the stream immediately
+                if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id) {
+                    remoteVideo.srcObject = remoteStream;
+                    console.log('New stream set:', remoteStream.id);
+                    
+                    // Log tracks in the stream
+                    remoteStream.getTracks().forEach(track => {
+                        console.log(`Remote track: ${track.kind}, enabled: ${track.enabled}, state: ${track.readyState}`);
                     });
-            }
-        } else if (peerConnection.iceConnectionState === 'failed') {
-            console.error('ICE connection failed');
-            statusDiv.textContent = 'Connection failed - Click Next to try again';
-        }
-    };
 
-    return peerConnection;
+                    // Try to play immediately
+                    const playPromise = remoteVideo.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(error => {
+                            console.log('Immediate play failed, waiting for user interaction:', error);
+                            // Add a play button if needed
+                            remoteVideo.setAttribute('controls', '');
+                        });
+                    }
+                }
+                
+                // Also try to play when metadata is loaded
+                remoteVideo.onloadedmetadata = () => {
+                    console.log('Remote video metadata loaded, attempting to play');
+                    remoteVideo.play()
+                        .then(() => {
+                            console.log('Remote video playing successfully');
+                            remoteVideo.removeAttribute('controls');
+                            statusDiv.textContent = 'Connected to peer';
+                            isWaiting = false;
+                        })
+                        .catch(error => {
+                            console.error('Error playing remote video:', error);
+                            // Show controls if autoplay fails
+                            remoteVideo.setAttribute('controls', '');
+                        });
+                };
+
+                // Additional event listeners for debugging
+                remoteVideo.onplay = () => console.log('Remote video play event fired');
+                remoteVideo.onplaying = () => console.log('Remote video playing event fired');
+                remoteVideo.onwaiting = () => console.log('Remote video waiting for data');
+                remoteVideo.onstalled = () => console.log('Remote video stalled');
+            } else {
+                console.error('Missing remote stream or video element');
+            }
+        };
+
+        // ICE candidate handling
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log('Sending ICE candidate to peer');
+                socket.emit('ice_candidate', {
+                    target: partnerId,
+                    candidate: event.candidate
+                });
+            }
+        };
+
+        // Connection state handling
+        peerConnection.oniceconnectionstatechange = () => {
+            console.log('ICE connection state:', peerConnection.iceConnectionState);
+            if (peerConnection.iceConnectionState === 'connected') {
+                console.log('ICE connection established');
+                const remoteVideo = document.getElementById('remoteVideo');
+                if (remoteVideo.srcObject) {
+                    remoteVideo.play()
+                        .then(() => {
+                            console.log('Remote video playing after ICE connection');
+                            remoteVideo.removeAttribute('controls');
+                        })
+                        .catch(e => {
+                            console.error('Error playing video after ICE connection:', e);
+                            remoteVideo.setAttribute('controls', '');
+                        });
+                }
+            } else if (peerConnection.iceConnectionState === 'failed') {
+                console.error('ICE connection failed');
+                statusDiv.textContent = 'Connection failed - Click Next to try again';
+            }
+        };
+
+        return peerConnection;
+    } catch (error) {
+        console.error('Error creating peer connection:', error);
+    }
 }
 
 function cleanupConnection() {
