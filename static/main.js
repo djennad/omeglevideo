@@ -308,7 +308,40 @@ async function createPeerConnection(partnerId) {
         if (remoteStream && remoteVideo) {
             console.log('Setting remote video stream');
             remoteVideo.srcObject = remoteStream;
-            remoteVideo.play().catch(e => console.error('Error playing remote video:', e));
+            
+            // Wait for video to be ready before playing
+            remoteVideo.onloadedmetadata = () => {
+                console.log('Remote video metadata loaded, attempting to play');
+                const playPromise = remoteVideo.play();
+                
+                if (playPromise !== undefined) {
+                    playPromise
+                        .then(() => {
+                            console.log('Remote video playing successfully');
+                        })
+                        .catch(error => {
+                            console.error('Error playing remote video:', error);
+                            // Try to play again after a short delay
+                            setTimeout(() => {
+                                remoteVideo.play()
+                                    .then(() => console.log('Remote video playing after retry'))
+                                    .catch(e => console.error('Failed to play video after retry:', e));
+                            }, 1000);
+                        });
+                }
+            };
+            
+            // Handle video playing
+            remoteVideo.onplaying = () => {
+                console.log('Remote video is now playing');
+                statusDiv.textContent = 'Connected to peer';
+                isWaiting = false;
+            };
+            
+            // Handle video errors
+            remoteVideo.onerror = (error) => {
+                console.error('Remote video error:', error);
+            };
         } else {
             console.error('Missing remote stream or video element');
         }
