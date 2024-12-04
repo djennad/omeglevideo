@@ -18,31 +18,34 @@ const configuration = {
     iceServers: [
         {
             urls: [
-                'turn:openrelay.metered.ca:80',
-                'turn:openrelay.metered.ca:443',
-                'turn:openrelay.metered.ca:443?transport=tcp',
-                'turn:openrelay.metered.ca:80?transport=tcp',
-                'turn:openrelay.metered.ca:443?transport=udp',
-                'turn:openrelay.metered.ca:80?transport=udp'
+                'turn:freeturn.net:3478',
+                'turn:freeturn.net:3478?transport=tcp'
             ],
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
+            username: 'free',
+            credential: 'free'
+        },
+        {
+            urls: [
+                'turn:relay.metered.ca:80',
+                'turn:relay.metered.ca:443',
+                'turn:relay.metered.ca:443?transport=tcp',
+                'turn:relay.metered.ca:80?transport=tcp'
+            ],
+            username: '83e4a0df687f3fd5e777f491',
+            credential: 'L8YhnBwZ+q1Ey7Yc'
         },
         {
             urls: [
                 'stun:stun.l.google.com:19302',
                 'stun:stun1.l.google.com:19302',
-                'stun:stun2.l.google.com:19302',
-                'stun:stun3.l.google.com:19302',
-                'stun:stun4.l.google.com:19302'
+                'stun:stun2.l.google.com:19302'
             ]
         }
     ],
+    iceTransportPolicy: 'relay', // Force usage of TURN servers
     iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all',
     bundlePolicy: 'max-bundle',
-    rtcpMuxPolicy: 'require',
-    iceServersPolicy: 'all'
+    rtcpMuxPolicy: 'require'
 };
 
 const startButton = document.getElementById('startButton');
@@ -374,8 +377,13 @@ async function createPeerConnection(partnerId) {
                     break;
                 case 'disconnected':
                     console.log('Disconnected from peer');
-                    statusDiv.textContent = 'Disconnected - Click Next to try again';
-                    cleanupConnection();
+                    statusDiv.textContent = 'Disconnected - Attempting to reconnect...';
+                    // Don't cleanup immediately, give it a chance to reconnect
+                    setTimeout(() => {
+                        if (peerConnection && peerConnection.connectionState === 'disconnected') {
+                            cleanupConnection();
+                        }
+                    }, 5000);
                     break;
                 case 'failed':
                     console.log('Connection failed');
@@ -406,14 +414,19 @@ async function createPeerConnection(partnerId) {
                     break;
                 case 'failed':
                     console.error('ICE connection failed');
-                    statusDiv.textContent = 'Connection failed - Click Next to try again';
-                    cleanupConnection();
+                    // Try reconnecting with a new configuration
+                    if (peerConnection) {
+                        console.log('Attempting to restart ICE connection...');
+                        peerConnection.restartIce();
+                        // Create and send a new offer
+                        createAndSendOffer();
+                    }
                     break;
                 case 'disconnected':
                     console.log('ICE connection disconnected');
                     statusDiv.textContent = 'Connection interrupted - Attempting to reconnect...';
-                    // Try to reconnect by restarting ICE
                     if (peerConnection) {
+                        console.log('Attempting to restart ICE connection...');
                         peerConnection.restartIce();
                     }
                     break;
@@ -436,11 +449,22 @@ async function createPeerConnection(partnerId) {
         // ICE candidate handling
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('New ICE candidate:', event.candidate.type);
-                socket.emit('ice_candidate', {
-                    target: partnerId,
-                    candidate: event.candidate
+                const candidate = event.candidate;
+                console.log('New ICE candidate:', {
+                    type: candidate.type,
+                    protocol: candidate.protocol,
+                    address: candidate.address,
+                    port: candidate.port,
+                    priority: candidate.priority
                 });
+                
+                // Only send relay candidates or if we've waited long enough
+                if (candidate.type === 'relay' || peerConnection.iceGatheringState === 'complete') {
+                    socket.emit('ice_candidate', {
+                        target: partnerId,
+                        candidate: candidate
+                    });
+                }
             } else {
                 console.log('All ICE candidates have been gathered');
             }
@@ -477,4 +501,25 @@ function cleanupConnection() {
         tracks.forEach(track => track.stop());
         remoteVideo.srcObject = null;
     }
+}
+
+function createAndSendOffer() {
+    peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+    })
+    .then(offer => {
+        console.log('Setting local description');
+        return peerConnection.setLocalDescription(offer);
+    })
+    .then(() => {
+        console.log('Sending offer to peer');
+        socket.emit('offer', {
+            target: currentRoom,
+            sdp: peerConnection.localDescription
+        });
+    })
+    .catch(error => {
+        console.error('Error creating and sending offer:', error);
+    });
 }
