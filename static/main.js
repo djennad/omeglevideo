@@ -301,46 +301,42 @@ async function createPeerConnection(partnerId) {
 
     // Handle incoming tracks
     peerConnection.ontrack = (event) => {
-        console.log('Received remote track');
+        console.log('Received remote track:', event.track.kind);
         const [remoteStream] = event.streams;
         const remoteVideo = document.getElementById('remoteVideo');
         
         if (remoteStream && remoteVideo) {
             console.log('Setting remote video stream');
-            remoteVideo.srcObject = remoteStream;
+            
+            // Ensure we have both audio and video tracks before setting srcObject
+            if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id) {
+                remoteVideo.srcObject = remoteStream;
+                console.log('New stream set:', remoteStream.id);
+                
+                // Log tracks in the stream
+                remoteStream.getTracks().forEach(track => {
+                    console.log(`Remote track: ${track.kind}, enabled: ${track.enabled}, state: ${track.readyState}`);
+                });
+            }
             
             // Wait for video to be ready before playing
             remoteVideo.onloadedmetadata = () => {
                 console.log('Remote video metadata loaded, attempting to play');
-                const playPromise = remoteVideo.play();
-                
-                if (playPromise !== undefined) {
-                    playPromise
-                        .then(() => {
-                            console.log('Remote video playing successfully');
-                        })
-                        .catch(error => {
-                            console.error('Error playing remote video:', error);
-                            // Try to play again after a short delay
-                            setTimeout(() => {
-                                remoteVideo.play()
-                                    .then(() => console.log('Remote video playing after retry'))
-                                    .catch(e => console.error('Failed to play video after retry:', e));
-                            }, 1000);
-                        });
-                }
-            };
-            
-            // Handle video playing
-            remoteVideo.onplaying = () => {
-                console.log('Remote video is now playing');
-                statusDiv.textContent = 'Connected to peer';
-                isWaiting = false;
-            };
-            
-            // Handle video errors
-            remoteVideo.onerror = (error) => {
-                console.error('Remote video error:', error);
+                remoteVideo.play()
+                    .then(() => {
+                        console.log('Remote video playing successfully');
+                        statusDiv.textContent = 'Connected to peer';
+                        isWaiting = false;
+                    })
+                    .catch(error => {
+                        console.error('Error playing remote video:', error);
+                        // Try to play again after a short delay
+                        setTimeout(() => {
+                            remoteVideo.play()
+                                .then(() => console.log('Remote video playing after retry'))
+                                .catch(e => console.error('Failed to play video after retry:', e));
+                        }, 1000);
+                    });
             };
         } else {
             console.error('Missing remote stream or video element');
@@ -362,8 +358,13 @@ async function createPeerConnection(partnerId) {
     peerConnection.oniceconnectionstatechange = () => {
         console.log('ICE connection state:', peerConnection.iceConnectionState);
         if (peerConnection.iceConnectionState === 'connected') {
-            statusDiv.textContent = 'Connected to peer';
-            isWaiting = false;
+            console.log('ICE connection established');
+            const remoteVideo = document.getElementById('remoteVideo');
+            if (remoteVideo.srcObject) {
+                remoteVideo.play()
+                    .then(() => console.log('Remote video playing after ICE connection'))
+                    .catch(e => console.error('Error playing video after ICE connection:', e));
+            }
         } else if (peerConnection.iceConnectionState === 'failed') {
             console.error('ICE connection failed');
             statusDiv.textContent = 'Connection failed - Click Next to try again';
