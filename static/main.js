@@ -240,13 +240,19 @@ async function next() {
             
             // Add local tracks to the connection
             if (localStream) {
-                localStream.getTracks().forEach(track => {
-                    console.log('Adding local track to peer connection:', track.kind);
-                    peerConnection.addTrack(track, localStream);
+                // Get fresh tracks from the stream
+                const tracks = localStream.getTracks();
+                tracks.forEach(track => {
+                    try {
+                        console.log('Adding local track to peer connection:', track.kind);
+                        peerConnection.addTrack(track, localStream);
+                    } catch (error) {
+                        console.error('Error adding track:', error);
+                    }
                 });
             }
 
-            // Create and send offer if we're the initiator
+            // Create and send offer
             const offer = await peerConnection.createOffer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: true
@@ -266,6 +272,7 @@ async function next() {
             statusDiv.textContent = 'Connection failed - Click Next to try again';
             nextButton.disabled = false;
             isWaiting = false;
+            cleanupConnection(); // Clean up on error
         }
     });
 }
@@ -558,29 +565,29 @@ async function createPeerConnection(partnerId) {
 
 function cleanupConnection() {
     console.log('Cleaning up peer connection');
+    
+    // Close and remove all senders first
     if (peerConnection) {
-        // Close all tracks but keep the connection
         const senders = peerConnection.getSenders();
         senders.forEach(sender => {
-            if (sender.track) {
-                sender.track.stop();
-            }
+            peerConnection.removeTrack(sender);
         });
         
-        // Only close the connection if we're sure we want to disconnect
-        if (!isWaiting) {
-            peerConnection.close();
-            peerConnection = null;
-        }
+        // Close the connection
+        peerConnection.close();
+        peerConnection = null;
     }
-    
-    // Clear remote video
+
+    // Clean up video elements
     const remoteVideo = document.getElementById('remoteVideo');
-    if (remoteVideo.srcObject) {
-        const tracks = remoteVideo.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
+    if (remoteVideo) {
         remoteVideo.srcObject = null;
+        remoteVideo.load(); // Force cleanup of video element
     }
+
+    // Reset state
+    isWaiting = false;
+    nextButton.disabled = false;
 }
 
 function createAndSendOffer() {
