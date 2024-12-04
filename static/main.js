@@ -55,7 +55,7 @@ const remoteVideo = document.getElementById('remoteVideo');
 const statusDiv = document.getElementById('status');
 
 startButton.addEventListener('click', startChat);
-nextButton.addEventListener('click', nextPeer);
+nextButton.addEventListener('click', next);
 
 // Socket connection status
 socket.on('connect', () => {
@@ -164,28 +164,83 @@ async function startChat() {
     }
 }
 
-function nextPeer() {
-    if (!isConnected) {
-        statusDiv.textContent = 'Not connected to server - Please refresh the page';
+let autoSkipTimer = null;
+let isAutoSkipping = false;
+
+function startAutoSkip() {
+    if (!isAutoSkipping) {
+        isAutoSkipping = true;
+        checkAndSkip();
+    }
+}
+
+function stopAutoSkip() {
+    isAutoSkipping = false;
+    if (autoSkipTimer) {
+        clearTimeout(autoSkipTimer);
+        autoSkipTimer = null;
+    }
+}
+
+function checkAndSkip() {
+    if (!isAutoSkipping) return;
+    
+    socket.emit('check_users', (response) => {
+        console.log('Checking for users:', response);
+        if (!response.hasUsers) {
+            statusDiv.textContent = 'No users online. Will automatically connect when someone joins...';
+            // Check again in 5 seconds
+            autoSkipTimer = setTimeout(checkAndSkip, 5000);
+        } else {
+            statusDiv.textContent = 'Users found! Connecting...';
+            stopAutoSkip();
+            nextButton.click();
+        }
+    });
+}
+
+async function next() {
+    if (isWaiting) {
+        console.log('Already waiting for a peer');
         return;
     }
 
-    // First check if there are other users online
+    console.log('Looking for next peer');
+    cleanupConnection();
+    isWaiting = true;
+    nextButton.disabled = true;
+    statusDiv.textContent = 'Looking for a peer...';
+
+    // Start auto-skip if no users are available
     socket.emit('check_users', (response) => {
-        if (response.hasUsers) {
-            console.log('Looking for next peer');
-            cleanupConnection();
-            isWaiting = true;
-            statusDiv.textContent = 'Looking for next person...';
-            socket.emit('next');
-        } else {
-            console.log('No other users online, staying in current connection');
-            statusDiv.textContent = 'No other users online right now - Staying in current chat';
-            setTimeout(() => {
-                if (peerConnection) {
-                    statusDiv.textContent = 'Connected to peer';
-                }
-            }, 3000);
+        if (!response.hasUsers) {
+            startAutoSkip();
+        }
+    });
+
+    socket.emit('next', async (response) => {
+        if (response.error) {
+            console.log('Error finding next peer:', response.error);
+            statusDiv.textContent = response.error;
+            if (response.error === 'no other users online') {
+                startAutoSkip();
+            }
+            nextButton.disabled = false;
+            isWaiting = false;
+            return;
+        }
+
+        stopAutoSkip();
+        currentRoom = response.room;
+        console.log('Matched with peer:', response);
+        
+        try {
+            await setupConnection(response.partnerId);
+        } catch (error) {
+            console.error('Error setting up connection:', error);
+            statusDiv.textContent = 'Connection failed - Click Next to try again';
+            nextButton.disabled = false;
+            isWaiting = false;
         }
     });
 }

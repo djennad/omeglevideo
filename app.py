@@ -3,6 +3,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 import logging
 import os
 from threading import Lock
+import uuid
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -103,6 +104,13 @@ class UserManager:
                 'initiator': user1  # user1 will always be the initiator
             }
 
+    def find_partner(self, user_id):
+        with self.lock:
+            for partner_id in self.waiting_users:
+                if partner_id != user_id:
+                    return partner_id
+            return None
+
 user_manager = UserManager()
 
 connected_users = {}
@@ -157,55 +165,52 @@ def handle_join():
         emit('error', {'message': 'Already waiting or in a chat'})
 
 @socketio.on('check_users')
-def handle_check_users():
-    """Check if there are other users available"""
+def check_users():
     user_id = request.sid
     with user_manager.lock:
         # Count other users (excluding current user)
         other_waiting = len([u for u in user_manager.waiting_users if u != user_id])
         other_active = len(user_manager.active_users) // 2  # divide by 2 since each active user is counted twice
         has_users = (other_waiting + other_active) > 0
-        logger.info(f"Checking users for {user_id}: other_waiting={other_waiting}, other_active={other_active}")
+        print(f"Checking users for {user_id}: waiting={other_waiting}, active={other_active}")
         return {'hasUsers': has_users}
 
 @socketio.on('next')
 def handle_next():
     user_id = request.sid
-    logger.info(f"Next request from {user_id}")
+    print(f"User {user_id} looking for next peer")
     
     # First check if there are other users
     with user_manager.lock:
         other_waiting = len([u for u in user_manager.waiting_users if u != user_id])
-        other_active = len(user_manager.active_users) // 2  # divide by 2 since each active user is counted twice
+        other_active = len(user_manager.active_users) // 2
         if (other_waiting + other_active) == 0:
-            logger.info(f"No other users online for {user_id}")
-            emit('error', {'message': 'no other users online'})
-            return
+            print(f"No other users online for {user_id}")
+            return {'error': 'no other users online'}
 
-    success, error_message = user_manager.next_user(user_id)
-    if not success:
-        logger.warning(f"Next failed for {user_id}: {error_message}")
-        emit('error', {'message': error_message})
-        return
+    # Clean up existing connection if any
+    if user_id in connected_users:
+        partner_id = connected_users[user_id]
+        if partner_id in connected_users:
+            del connected_users[partner_id]
+        del connected_users[user_id]
 
-    # Try to find a match immediately
-    match = user_manager.try_match_users()
-    if match:
-        logger.info(f"Match found: {match}")
-        emit('matched', {
-            'partnerId': match['user2'],
-            'room': match['room'],
-            'initiator': match['initiator']
-        }, room=match['user1'])
-        
-        emit('matched', {
-            'partnerId': match['user1'],
-            'room': match['room'],
-            'initiator': match['initiator']
-        }, room=match['user2'])
-    else:
-        logger.info(f"No match found for {user_id}, waiting...")
-        emit('waiting')
+    # Find a new partner
+    partner_id = user_manager.find_partner(user_id)
+    if not partner_id:
+        return {'error': 'no available partners'}
+
+    # Create a new room
+    room = str(uuid.uuid4())
+    join_room(room)
+    join_room(room, partner_id)
+    
+    # Update connected users
+    connected_users[user_id] = partner_id
+    connected_users[partner_id] = user_id
+
+    print(f"Matched {user_id} with {partner_id} in room {room}")
+    return {'partnerId': partner_id, 'room': room}
 
 @socketio.on('offer')
 def handle_offer(data):
