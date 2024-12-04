@@ -235,7 +235,32 @@ async function next() {
         console.log('Matched with peer:', response);
         
         try {
-            await setupConnection(response.partnerId);
+            // Create new peer connection
+            peerConnection = await createPeerConnection(response.partnerId);
+            
+            // Add local tracks to the connection
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    console.log('Adding local track to peer connection:', track.kind);
+                    peerConnection.addTrack(track, localStream);
+                });
+            }
+
+            // Create and send offer if we're the initiator
+            const offer = await peerConnection.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+            });
+            
+            await peerConnection.setLocalDescription(offer);
+            console.log('Sending offer to peer');
+            socket.emit('offer', {
+                target: response.partnerId,
+                sdp: offer
+            });
+
+            nextButton.disabled = false;
+            isWaiting = false;
         } catch (error) {
             console.error('Error setting up connection:', error);
             statusDiv.textContent = 'Connection failed - Click Next to try again';
