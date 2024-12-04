@@ -34,6 +34,9 @@
             background-color: #000;
             border-radius: 8px;
             overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         video {
@@ -41,6 +44,14 @@
             height: 100%;
             object-fit: cover;
             background-color: #000;
+            transform: scaleX(-1); /* Mirror the video */
+        }
+
+        #remoteVideo {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
         }
 
         .video-label {

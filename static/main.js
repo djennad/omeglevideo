@@ -308,7 +308,7 @@ async function createPeerConnection(partnerId) {
         if (remoteStream && remoteVideo) {
             console.log('Setting remote video stream');
             
-            // Ensure we have both audio and video tracks before setting srcObject
+            // Set the stream immediately
             if (!remoteVideo.srcObject || remoteVideo.srcObject.id !== remoteStream.id) {
                 remoteVideo.srcObject = remoteStream;
                 console.log('New stream set:', remoteStream.id);
@@ -317,27 +317,40 @@ async function createPeerConnection(partnerId) {
                 remoteStream.getTracks().forEach(track => {
                     console.log(`Remote track: ${track.kind}, enabled: ${track.enabled}, state: ${track.readyState}`);
                 });
+
+                // Try to play immediately
+                const playPromise = remoteVideo.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.log('Immediate play failed, waiting for user interaction:', error);
+                        // Add a play button if needed
+                        remoteVideo.setAttribute('controls', '');
+                    });
+                }
             }
             
-            // Wait for video to be ready before playing
+            // Also try to play when metadata is loaded
             remoteVideo.onloadedmetadata = () => {
                 console.log('Remote video metadata loaded, attempting to play');
                 remoteVideo.play()
                     .then(() => {
                         console.log('Remote video playing successfully');
+                        remoteVideo.removeAttribute('controls');
                         statusDiv.textContent = 'Connected to peer';
                         isWaiting = false;
                     })
                     .catch(error => {
                         console.error('Error playing remote video:', error);
-                        // Try to play again after a short delay
-                        setTimeout(() => {
-                            remoteVideo.play()
-                                .then(() => console.log('Remote video playing after retry'))
-                                .catch(e => console.error('Failed to play video after retry:', e));
-                        }, 1000);
+                        // Show controls if autoplay fails
+                        remoteVideo.setAttribute('controls', '');
                     });
             };
+
+            // Additional event listeners for debugging
+            remoteVideo.onplay = () => console.log('Remote video play event fired');
+            remoteVideo.onplaying = () => console.log('Remote video playing event fired');
+            remoteVideo.onwaiting = () => console.log('Remote video waiting for data');
+            remoteVideo.onstalled = () => console.log('Remote video stalled');
         } else {
             console.error('Missing remote stream or video element');
         }
@@ -362,8 +375,14 @@ async function createPeerConnection(partnerId) {
             const remoteVideo = document.getElementById('remoteVideo');
             if (remoteVideo.srcObject) {
                 remoteVideo.play()
-                    .then(() => console.log('Remote video playing after ICE connection'))
-                    .catch(e => console.error('Error playing video after ICE connection:', e));
+                    .then(() => {
+                        console.log('Remote video playing after ICE connection');
+                        remoteVideo.removeAttribute('controls');
+                    })
+                    .catch(e => {
+                        console.error('Error playing video after ICE connection:', e);
+                        remoteVideo.setAttribute('controls', '');
+                    });
             }
         } else if (peerConnection.iceConnectionState === 'failed') {
             console.error('ICE connection failed');
