@@ -16,34 +16,33 @@ let isWaiting = false;
 // WebRTC configuration
 const configuration = {
     iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
         {
-            urls: 'turn:a.relay.metered.ca:80',
-            username: '83e4a0df687f3fd5e777f491',
-            credential: 'L8YhnBwZ+q1Ey7Yc',
+            urls: [
+                'turn:openrelay.metered.ca:80',
+                'turn:openrelay.metered.ca:443',
+                'turn:openrelay.metered.ca:443?transport=tcp',
+                'turn:openrelay.metered.ca:80?transport=tcp',
+                'turn:openrelay.metered.ca:443?transport=udp',
+                'turn:openrelay.metered.ca:80?transport=udp'
+            ],
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
         },
         {
-            urls: 'turn:a.relay.metered.ca:80?transport=tcp',
-            username: '83e4a0df687f3fd5e777f491',
-            credential: 'L8YhnBwZ+q1Ey7Yc',
-        },
-        {
-            urls: 'turn:a.relay.metered.ca:443',
-            username: '83e4a0df687f3fd5e777f491',
-            credential: 'L8YhnBwZ+q1Ey7Yc',
-        },
-        {
-            urls: 'turn:a.relay.metered.ca:443?transport=tcp',
-            username: '83e4a0df687f3fd5e777f491',
-            credential: 'L8YhnBwZ+q1Ey7Yc',
+            urls: [
+                'stun:stun.l.google.com:19302',
+                'stun:stun1.l.google.com:19302',
+                'stun:stun2.l.google.com:19302',
+                'stun:stun3.l.google.com:19302',
+                'stun:stun4.l.google.com:19302'
+            ]
         }
     ],
     iceCandidatePoolSize: 10,
-    iceTransportPolicy: 'all'
+    iceTransportPolicy: 'all',
+    bundlePolicy: 'max-bundle',
+    rtcpMuxPolicy: 'require',
+    iceServersPolicy: 'all'
 };
 
 const startButton = document.getElementById('startButton');
@@ -365,37 +364,85 @@ async function createPeerConnection(partnerId) {
             }
         };
 
+        // Connection state handling
+        peerConnection.onconnectionstatechange = () => {
+            console.log('Connection state changed:', peerConnection.connectionState);
+            switch(peerConnection.connectionState) {
+                case 'connected':
+                    console.log('Successfully connected to peer');
+                    statusDiv.textContent = 'Connected to peer';
+                    break;
+                case 'disconnected':
+                    console.log('Disconnected from peer');
+                    statusDiv.textContent = 'Disconnected - Click Next to try again';
+                    cleanupConnection();
+                    break;
+                case 'failed':
+                    console.log('Connection failed');
+                    statusDiv.textContent = 'Connection failed - Click Next to try again';
+                    cleanupConnection();
+                    break;
+                case 'closed':
+                    console.log('Connection closed');
+                    statusDiv.textContent = 'Connection closed - Click Next to try again';
+                    cleanupConnection();
+                    break;
+            }
+        };
+
+        // ICE connection state handling
+        peerConnection.oniceconnectionstatechange = () => {
+            console.log('ICE connection state:', peerConnection.iceConnectionState);
+            switch(peerConnection.iceConnectionState) {
+                case 'checking':
+                    statusDiv.textContent = 'Connecting...';
+                    break;
+                case 'connected':
+                    console.log('ICE connection established');
+                    statusDiv.textContent = 'Connected';
+                    break;
+                case 'completed':
+                    console.log('ICE connection completed');
+                    break;
+                case 'failed':
+                    console.error('ICE connection failed');
+                    statusDiv.textContent = 'Connection failed - Click Next to try again';
+                    cleanupConnection();
+                    break;
+                case 'disconnected':
+                    console.log('ICE connection disconnected');
+                    statusDiv.textContent = 'Connection interrupted - Attempting to reconnect...';
+                    // Try to reconnect by restarting ICE
+                    if (peerConnection) {
+                        peerConnection.restartIce();
+                    }
+                    break;
+            }
+        };
+
+        // ICE gathering state handling
+        peerConnection.onicegatheringstatechange = () => {
+            console.log('ICE gathering state:', peerConnection.iceGatheringState);
+            switch(peerConnection.iceGatheringState) {
+                case 'gathering':
+                    console.log('Gathering ICE candidates...');
+                    break;
+                case 'complete':
+                    console.log('ICE gathering completed');
+                    break;
+            }
+        };
+
         // ICE candidate handling
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('Sending ICE candidate to peer');
+                console.log('New ICE candidate:', event.candidate.type);
                 socket.emit('ice_candidate', {
                     target: partnerId,
                     candidate: event.candidate
                 });
-            }
-        };
-
-        // Connection state handling
-        peerConnection.oniceconnectionstatechange = () => {
-            console.log('ICE connection state:', peerConnection.iceConnectionState);
-            if (peerConnection.iceConnectionState === 'connected') {
-                console.log('ICE connection established');
-                const remoteVideo = document.getElementById('remoteVideo');
-                if (remoteVideo.srcObject) {
-                    remoteVideo.play()
-                        .then(() => {
-                            console.log('Remote video playing after ICE connection');
-                            remoteVideo.removeAttribute('controls');
-                        })
-                        .catch(e => {
-                            console.error('Error playing video after ICE connection:', e);
-                            remoteVideo.setAttribute('controls', '');
-                        });
-                }
-            } else if (peerConnection.iceConnectionState === 'failed') {
-                console.error('ICE connection failed');
-                statusDiv.textContent = 'Connection failed - Click Next to try again';
+            } else {
+                console.log('All ICE candidates have been gathered');
             }
         };
 

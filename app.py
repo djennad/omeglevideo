@@ -105,6 +105,8 @@ class UserManager:
 
 user_manager = UserManager()
 
+connected_users = {}
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -116,8 +118,14 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    logger.info(f"User {request.sid} disconnected")
-    user_manager.remove_user(request.sid)
+    print(f"Client disconnected: {request.sid}")
+    if request.sid in connected_users:
+        partner_sid = connected_users[request.sid]
+        if partner_sid in connected_users:
+            emit('peer_disconnected', room=partner_sid)
+            del connected_users[partner_sid]
+        del connected_users[request.sid]
+        print(f"Removed user {request.sid} from connected users")
 
 @socketio.on('join')
 def handle_join():
@@ -155,7 +163,7 @@ def handle_check_users():
     with user_manager.lock:
         # Count other users (excluding current user)
         other_waiting = len([u for u in user_manager.waiting_users if u != user_id])
-        other_active = len([u for u in user_manager.active_users if u != user_id]) // 2
+        other_active = len(user_manager.active_users) // 2  # divide by 2 since each active user is counted twice
         has_users = (other_waiting + other_active) > 0
         logger.info(f"Checking users for {user_id}: other_waiting={other_waiting}, other_active={other_active}")
         return {'hasUsers': has_users}
@@ -168,7 +176,7 @@ def handle_next():
     # First check if there are other users
     with user_manager.lock:
         other_waiting = len([u for u in user_manager.waiting_users if u != user_id])
-        other_active = len([u for u in user_manager.active_users if u != user_id]) // 2
+        other_active = len(user_manager.active_users) // 2  # divide by 2 since each active user is counted twice
         if (other_waiting + other_active) == 0:
             logger.info(f"No other users online for {user_id}")
             emit('error', {'message': 'no other users online'})
@@ -217,15 +225,14 @@ def handle_answer(data):
 
 @socketio.on('ice_candidate')
 def handle_ice_candidate(data):
-    logger.info(f"Handling ICE candidate from {request.sid} to {data['target']}")
-    emit('ice_candidate', {
-        'candidate': data['candidate']
-    }, room=data['target'])
-
-@socketio.on_error()
-def error_handler(e):
-    logger.error(f"SocketIO error for {request.sid}: {str(e)}")
-    emit('error', {'message': str(e)})
+    target = data.get('target')
+    candidate = data.get('candidate')
+    
+    if target and candidate:
+        print(f"Forwarding ICE candidate to {target}")
+        emit('ice_candidate', {'candidate': candidate}, room=target)
+    else:
+        print("Invalid ICE candidate data received")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
