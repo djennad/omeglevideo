@@ -215,12 +215,11 @@ def handle_answer(data):
         'target': request.sid
     }, room=data['target'])
 
-@socketio.on('ice-candidate')
+@socketio.on('ice_candidate')
 def handle_ice_candidate(data):
     logger.info(f"Handling ICE candidate from {request.sid} to {data['target']}")
-    emit('ice-candidate', {
-        'candidate': data['candidate'],
-        'target': request.sid
+    emit('ice_candidate', {
+        'candidate': data['candidate']
     }, room=data['target'])
 
 @socketio.on_error()

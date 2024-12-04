@@ -218,6 +218,7 @@ socket.on('offer', async (data) => {
         if (!peerConnection) {
             await createPeerConnection(data.target);
         }
+
         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
         console.log('Creating answer');
         const answer = await peerConnection.createAnswer();
@@ -236,27 +237,26 @@ socket.on('offer', async (data) => {
 socket.on('answer', async (data) => {
     console.log('Received answer from peer');
     try {
-        const desc = new RTCSessionDescription(data.sdp);
-        if (peerConnection.signalingState === "have-local-offer") {
-            await peerConnection.setRemoteDescription(desc);
+        if (peerConnection && peerConnection.signalingState === "have-local-offer") {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
             console.log('Remote description set successfully');
         } else {
-            console.warn('Received answer in wrong signaling state:', peerConnection.signalingState);
+            console.warn('Received answer in wrong state:', peerConnection?.signalingState);
         }
     } catch (error) {
         console.error('Error handling answer:', error);
     }
 });
 
-socket.on('ice-candidate', async (data) => {
-    console.log('Received ICE candidate');
+socket.on('ice_candidate', async (data) => {
     try {
-        if (data.candidate) {
+        if (peerConnection) {
+            console.log('Received ICE candidate');
             await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
             console.log('Added ICE candidate successfully');
         }
     } catch (error) {
-        console.error('Error adding ice candidate:', error);
+        console.error('Error adding ICE candidate:', error);
     }
 });
 
@@ -280,45 +280,64 @@ socket.on('partner_disconnected', () => {
 });
 
 async function createPeerConnection(partnerId) {
-    if (peerConnection) {
-        cleanupConnection();
-    }
-
     console.log('Creating new peer connection');
-    peerConnection = new RTCPeerConnection(configuration);
+    const configuration = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
+        ]
+    };
 
+    peerConnection = new RTCPeerConnection(configuration);
+    
+    // Add all tracks from local stream to peer connection
+    localStream.getTracks().forEach(track => {
+        console.log('Adding local track to peer connection:', track.kind);
+        peerConnection.addTrack(track, localStream);
+    });
+
+    // Handle incoming tracks
+    peerConnection.ontrack = (event) => {
+        console.log('Received remote track');
+        const [remoteStream] = event.streams;
+        const remoteVideo = document.getElementById('remoteVideo');
+        
+        if (remoteStream && remoteVideo) {
+            console.log('Setting remote video stream');
+            remoteVideo.srcObject = remoteStream;
+            remoteVideo.play().catch(e => console.error('Error playing remote video:', e));
+        } else {
+            console.error('Missing remote stream or video element');
+        }
+    };
+
+    // ICE candidate handling
     peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
             console.log('Sending ICE candidate to peer');
-            socket.emit('ice-candidate', {
+            socket.emit('ice_candidate', {
                 target: partnerId,
                 candidate: event.candidate
             });
         }
     };
 
+    // Connection state handling
     peerConnection.oniceconnectionstatechange = () => {
         console.log('ICE connection state:', peerConnection.iceConnectionState);
-        if (peerConnection.iceConnectionState === 'disconnected' || 
-            peerConnection.iceConnectionState === 'failed') {
-            statusDiv.textContent = 'Peer connection lost';
-            cleanupConnection();
+        if (peerConnection.iceConnectionState === 'connected') {
+            statusDiv.textContent = 'Connected to peer';
+            isWaiting = false;
+        } else if (peerConnection.iceConnectionState === 'failed') {
+            console.error('ICE connection failed');
+            statusDiv.textContent = 'Connection failed - Click Next to try again';
         }
     };
 
-    peerConnection.ontrack = (event) => {
-        console.log('Received remote track');
-        if (remoteVideo.srcObject !== event.streams[0]) {
-            remoteVideo.srcObject = event.streams[0];
-            console.log('Set remote video stream');
-        }
-    };
-
-    // Add local tracks to the connection
-    localStream.getTracks().forEach(track => {
-        console.log('Adding local track to peer connection:', track.kind);
-        peerConnection.addTrack(track, localStream);
-    });
+    return peerConnection;
 }
 
 function cleanupConnection() {
